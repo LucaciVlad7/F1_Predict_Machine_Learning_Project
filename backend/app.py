@@ -24,7 +24,6 @@ if not os.path.exists(cache_dir):
 
 fastf1.Cache.enable_cache("f1_cache")
 
-# ========== HELPER FUNCTION FOR JSON SERIALIZATION ==========
 def convert_to_serializable(obj):
     """Convert numpy/pandas types to Python native types for JSON serialization"""
     if isinstance(obj, (np.integer, np.int64)):
@@ -37,43 +36,40 @@ def convert_to_serializable(obj):
         return None
     return obj
 
-# ========== DYNAMIC DATA FETCHING ==========
-
 def get_current_season_standings():
     """Fetch current constructor and driver standings"""
     try:
-        # Get current year
+
         current_year = datetime.now().year
         
-        # Try to get the most recent race with results
+
         schedule = fastf1.get_event_schedule(current_year)
         completed_races = schedule[schedule['EventDate'] < pd.Timestamp.now()]
         
         if len(completed_races) == 0:
-            # If no races completed this year, use last year's final standings
+
             current_year -= 1
             schedule = fastf1.get_event_schedule(current_year)
             completed_races = schedule
         
         last_race = completed_races.iloc[-1]
         print(f"Using standings after: {last_race['EventName']} {current_year}")
-        
-        # Get the last race session to extract standings
+
         session = fastf1.get_session(current_year, last_race['RoundNumber'], 'R')
         session.load()
         
-        # Get constructor standings (approximate from race results)
+
         results = session.results
         team_points = results.groupby('TeamName')['Points'].sum().to_dict()
         
-        # Get driver to team mapping
+
         driver_to_team = dict(zip(results['Abbreviation'], results['TeamName']))
         
         return team_points, driver_to_team
         
     except Exception as e:
         print(f"Error fetching standings: {e}")
-        # Fallback to manual data
+
         return None, None
 
 
@@ -84,31 +80,31 @@ def get_qualifying_data(year, race_name):
         quali_session = fastf1.get_session(year, race_name, 'Q')
         quali_session.load()
         
-        # Check if we actually have qualifying results
+
         if len(quali_session.results) == 0 or quali_session.results['Abbreviation'].isna().all():
             print(f"No qualifying data found for {year}. Trying previous year...")
             raise ValueError("No qualifying data for current year")
         
-        # Get qualifying results
+
         quali_results = quali_session.results[['Abbreviation', 'Q3', 'Q2', 'Q1']].copy()
         
-        # Check if we have actual qualifying times
+
         if quali_results[['Q3', 'Q2', 'Q1']].isna().all().all():
             print(f"No qualifying times found for {year}. Trying previous year...")
             raise ValueError("No qualifying times available")
         
-        # Use best qualifying time (Q3 > Q2 > Q1)
+
         quali_results['BestQualifyingTime'] = quali_results['Q3'].fillna(
             quali_results['Q2'].fillna(quali_results['Q1'])
         )
         
-        # Convert to seconds
+
         quali_results['QualifyingTime (s)'] = quali_results['BestQualifyingTime'].dt.total_seconds()
         
-        # Rename column and get team info
+
         quali_results.rename(columns={'Abbreviation': 'Driver'}, inplace=True)
         
-        # Add team information if available
+
         if 'TeamName' in quali_session.results.columns:
             team_mapping = dict(zip(quali_session.results['Abbreviation'], quali_session.results['TeamName']))
             quali_results['Team'] = quali_results['Driver'].map(team_mapping)
@@ -119,38 +115,35 @@ def get_qualifying_data(year, race_name):
     except Exception as e:
         print(f"Error fetching {year} qualifying data: {e}")
         
-        # Try previous year as fallback
+
         fallback_year = year - 1
         try:
             print(f"🔄 Fetching {fallback_year} qualifying data as fallback...")
             quali_session = fastf1.get_session(fallback_year, race_name, 'Q')
             quali_session.load()
             
-            # Check if we have data for previous year
             if len(quali_session.results) == 0:
                 print(f"No qualifying data found for {fallback_year} either")
                 return None
             
-            # Get qualifying results
             quali_results = quali_session.results[['Abbreviation', 'Q3', 'Q2', 'Q1']].copy()
             
-            # Use best qualifying time (Q3 > Q2 > Q1)
+
             quali_results['BestQualifyingTime'] = quali_results['Q3'].fillna(
                 quali_results['Q2'].fillna(quali_results['Q1'])
             )
             
-            # Convert to seconds
+        
             quali_results['QualifyingTime (s)'] = quali_results['BestQualifyingTime'].dt.total_seconds()
             
-            # Rename column
+        
             quali_results.rename(columns={'Abbreviation': 'Driver'}, inplace=True)
             
-            # Add team information if available
+          
             if 'TeamName' in quali_session.results.columns:
                 team_mapping = dict(zip(quali_session.results['Abbreviation'], quali_session.results['TeamName']))
                 quali_results['Team'] = quali_results['Driver'].map(team_mapping)
             
-            # Update driver codes to current season equivalents (if needed)
             driver_mapping = {
                 # Add any driver changes between years here
                 # Example: "OLD_CODE": "NEW_CODE"
@@ -173,30 +166,28 @@ def get_practice_pace_data(year, race_name):
     """Extract clean air race pace from practice sessions with fallback to previous year"""
     try:
         print(f"Attempting to fetch {year} practice data for {race_name}...")
-        # Try FP2 first (usually most representative)
         fp_session = fastf1.get_session(year, race_name, 'FP2')
         fp_session.load()
         
-        # Check if we have lap data
+
         if len(fp_session.laps) == 0:
             print(f"No practice data found for {year}. Trying previous year...")
             raise ValueError("No practice data for current year")
         
-        # Filter for race simulation laps (typically longer runs)
         laps = fp_session.laps
         
-        # Get clean laps (no traffic, no pit out/in)
+
         clean_laps = laps[
-            (laps['IsPersonalBest'] == False) &  # Not qualifying sim
+            (laps['IsPersonalBest'] == False) & 
             (laps['LapTime'].notna()) &
-            (laps['TyreLife'] > 3)  # Skip initial laps on new tires
+            (laps['TyreLife'] > 3)
         ].copy()
         
         if len(clean_laps) == 0:
             print("No clean practice laps found for current year")
             raise ValueError("No clean practice laps")
         
-        # Calculate average race pace per driver
+
         race_pace = clean_laps.groupby('Driver').agg({
             'LapTime': lambda x: x.dt.total_seconds().median()
         }).reset_index()
@@ -209,7 +200,7 @@ def get_practice_pace_data(year, race_name):
     except Exception as e:
         print(f"Error fetching {year} practice data: {e}")
         
-        # Try previous year as fallback
+
         fallback_year = year - 1
         try:
             print(f"🔄 Fetching {fallback_year} practice data as fallback...")
@@ -222,7 +213,7 @@ def get_practice_pace_data(year, race_name):
             
             laps = fp_session.laps
             
-            # Get clean laps
+
             clean_laps = laps[
                 (laps['IsPersonalBest'] == False) &
                 (laps['LapTime'].notna()) &
@@ -232,7 +223,7 @@ def get_practice_pace_data(year, race_name):
             if len(clean_laps) == 0:
                 return None
             
-            # Calculate average race pace per driver
+
             race_pace = clean_laps.groupby('Driver').agg({
                 'LapTime': lambda x: x.dt.total_seconds().median()
             }).reset_index()
@@ -258,8 +249,6 @@ def get_historical_position_changes(race_name, years=[2021, 2022, 2023, 2024]):
             session.load()
             results = session.results
             
-            # Calculate position change (GridPosition - Position)
-            # Positive = gained positions, Negative = lost positions
             for _, row in results.iterrows():
                 driver = row['Abbreviation']
                 if pd.notna(row['GridPosition']) and pd.notna(row['Position']):
@@ -273,9 +262,9 @@ def get_historical_position_changes(race_name, years=[2021, 2022, 2023, 2024]):
             print(f"Could not load {year} data: {e}")
             continue
     
-    # Average the position changes
+
     avg_position_changes = {
-        driver: -np.mean(changes)  # Negative because we want quali_pos - finish_pos
+        driver: -np.mean(changes) 
         for driver, changes in position_changes.items()
     }
     
@@ -286,7 +275,6 @@ def get_track_coordinates(race_name, year):
     """Get track GPS coordinates from event info"""
     try:
         event = fastf1.get_event(year, race_name)
-        # FastF1 doesn't provide coordinates directly, so we maintain a database
         track_coords = {
             "Monaco": (43.7384, 7.4246),
             "Monza": (45.6156, 9.2811),
@@ -313,7 +301,6 @@ def get_track_coordinates(race_name, year):
             "Hungary": (47.5789, 19.2486),
         }
         
-        # Try to match event name
         for track_name, coords in track_coords.items():
             if track_name.lower() in event['EventName'].lower():
                 return coords
@@ -325,8 +312,6 @@ def get_track_coordinates(race_name, year):
         return None
 
 
-# ========== MAIN PREDICTION FUNCTION ==========
-
 def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2023, 2024]):
     """
     Predict race results using dynamically fetched data with fallback to previous year
@@ -334,12 +319,12 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
     
     print(f"\n🏎️  Predicting {race_name} {year} Grand Prix 🏎️\n")
     
-    # 1. Get current standings
+
     print("📊 Fetching current standings...")
     team_points, driver_to_team = get_current_season_standings()
     
     if team_points is None:
-        # Fallback to manual data
+  
         print("Using fallback standings data...")
         team_points = {
             "McLaren Mercedes": 279, "Mercedes": 147, "Red Bull Racing Honda RBPT": 131, 
@@ -355,18 +340,16 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
             "ALB": "Williams Mercedes"
         }
     
-    # 2. Get qualifying data (with fallback to previous year)
+    
     print("🏁 Fetching qualifying data...")
     qualifying_data = get_qualifying_data(year, race_name)
     
     if qualifying_data is None or len(qualifying_data) == 0:
         raise ValueError(f"Could not fetch qualifying data for {race_name} in {year} or {year-1}")
     
-    # Ensure Team column exists
     if 'Team' not in qualifying_data.columns:
         qualifying_data['Team'] = qualifying_data['Driver'].map(driver_to_team)
     
-    # 3. Get practice pace data (with fallback to previous year)
     print("⏱️  Analyzing practice sessions...")
     practice_pace = get_practice_pace_data(year, race_name)
     
@@ -376,18 +359,15 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
         print("Warning: Could not fetch practice data - using estimated pace")
         qualifying_data['CleanAirRacePace (s)'] = qualifying_data['QualifyingTime (s)'] * 1.05
     
-    # 4. Get historical position changes
     print("📈 Calculating historical track performance...")
     position_changes = get_historical_position_changes(race_name, [2021, 2022, 2023, 2024])
     qualifying_data['AveragePositionChange'] = qualifying_data['Driver'].map(position_changes).fillna(0.0)
     
-    # 5. Add team performance scores
     max_points = max(team_points.values())
     team_performance_score = {team: points / max_points for team, points in team_points.items()}
     
     qualifying_data['TeamPerformanceScore'] = qualifying_data['Team'].map(team_performance_score).fillna(0.5)
     
-    # 6. Get weather data
     print("🌤️  Fetching weather forecast...")
     coords = get_track_coordinates(race_name, year)
     
@@ -398,7 +378,6 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
             response = requests.get(weather_url, timeout=5)
             weather_data = response.json()
             
-            # Get first available forecast (race day)
             forecast_data = weather_data["list"][0] if "list" in weather_data else None
             rain_probability = forecast_data["pop"] if forecast_data else 0
             temperature = forecast_data["main"]["temp"] if forecast_data else 20
@@ -414,7 +393,6 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
     qualifying_data['RainProbability'] = rain_probability
     qualifying_data['Temperature'] = temperature
     
-    # 7. Load historical data for training
     print("📚 Loading historical race data...")
     session_historical = fastf1.get_session(use_historical_years[-1], race_name, "R")
     session_historical.load()
@@ -422,7 +400,6 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
     laps_historical.dropna(inplace=True)
     laps_historical["LapTime (s)"] = laps_historical["LapTime"].dt.total_seconds()
     
-    # 8. Prepare features and train model
     valid_drivers = qualifying_data["Driver"].isin(laps_historical["Driver"].unique())
     qualifying_data = qualifying_data[valid_drivers]
     
@@ -435,29 +412,22 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
     ]]
     y = laps_historical.groupby("Driver")["LapTime (s)"].mean().reindex(qualifying_data["Driver"])
     
-    # Impute missing values
     imputer = SimpleImputer(strategy="median")
     X_imputed = imputer.fit_transform(X)
     
-    # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.3, random_state=37)
     
-    # Train model
     print("🤖 Training prediction model...")
     model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.7, max_depth=3, random_state=37)
     model.fit(X_train, y_train)
     
-    # Predict
     qualifying_data["PredictedRaceTime (s)"] = model.predict(X_imputed)
     
-    # Evaluate
     y_pred = model.predict(X_test)
     mae = mean_absolute_error(y_test, y_pred)
     
-    # Sort results
     final_results = qualifying_data.sort_values("PredictedRaceTime (s)").reset_index(drop=True)
     
-    # Display results
     print(f"\n✅ Model Error (MAE): {mae:.2f} seconds\n")
     print("🏁 Predicted Race Results 🏁\n")
     print(final_results[["Driver", "Team", "QualifyingTime (s)", "PredictedRaceTime (s)"]].head(10))
@@ -468,7 +438,7 @@ def predict_race_dynamic(year, race_name, api_key, use_historical_years=[2022, 2
     print(f"🥉 P3: {final_results.iloc[2]['Driver']} ({final_results.iloc[2]['Team']})")
     
     return final_results, model, X.columns
-# ========== FLASK API ROUTES ==========
+    
 def predict_race_api(race_name, year=2025):
     """
     API wrapper for predict_race_dynamic that returns JSON data
@@ -478,14 +448,12 @@ def predict_race_api(race_name, year=2025):
     try:
         print(f"API: Predicting {race_name} {year}")
         
-        # Call your existing prediction function
         final_results, model, features = predict_race_dynamic(
             year=year,
             race_name=race_name,
             api_key=API_KEY
         )
         
-        # Convert results to API format with proper serialization
         predictions = []
         for index, row in final_results.iterrows():
             predictions.append({
@@ -496,14 +464,13 @@ def predict_race_api(race_name, year=2025):
                 "qualifyingTime": f"{convert_to_serializable(row['QualifyingTime (s)']):.3f}s"
             })
         
-        # Calculate model accuracy (simplified)
         model_accuracy = max(85.0, min(95.0, 100 - (len(final_results) * 2.5)))
         
         return {
             "success": True,
             "raceName": str(race_name),
             "year": convert_to_serializable(year),
-            "predictions": predictions[:10],  # Top 10 results
+            "predictions": predictions[:10],  
             "modelAccuracy": convert_to_serializable(model_accuracy),
             "weatherConditions": {
                 "temperature": convert_to_serializable(final_results.iloc[0].get('Temperature', 20)),
@@ -516,7 +483,6 @@ def predict_race_api(race_name, year=2025):
         import traceback
         traceback.print_exc()
         
-        # Return mock data if prediction fails
         mock_predictions = [
             {"driver": "VER", "team": "Red Bull", "position": 1, "predictedTime": "1:32.456s", "qualifyingTime": "1:31.123s"},
             {"driver": "NOR", "team": "McLaren", "position": 2, "predictedTime": "1:32.678s", "qualifyingTime": "1:31.456s"},
@@ -572,7 +538,6 @@ def get_available_races():
     ]
     return jsonify({"success": True, "races": races})
 
-# Keep your existing main execution block
 if __name__ == '__main__':
     print("🏎️  Starting F1 Prediction API...")
     print("🔗 API will be available at: http://localhost:5000")
